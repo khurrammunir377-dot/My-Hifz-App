@@ -1,0 +1,84 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Scaffold Android platform folder
+        run: flutter create --platforms=android --project-name hifz_companion --org com.hifzcompanion .
+
+      - name: Apply custom Android manifest and app icons
+        run: |
+          cp -f android_overlay/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          cp -rf android_overlay/app/src/main/res/mipmap-mdpi/. android/app/src/main/res/mipmap-mdpi/
+          cp -rf android_overlay/app/src/main/res/mipmap-hdpi/. android/app/src/main/res/mipmap-hdpi/
+          cp -rf android_overlay/app/src/main/res/mipmap-xhdpi/. android/app/src/main/res/mipmap-xhdpi/
+          cp -rf android_overlay/app/src/main/res/mipmap-xxhdpi/. android/app/src/main/res/mipmap-xxhdpi/
+          cp -rf android_overlay/app/src/main/res/mipmap-xxxhdpi/. android/app/src/main/res/mipmap-xxxhdpi/
+
+      - name: Force compileSdk 36 / targetSdk 36 / minSdk 23 (required by audioplayers_android and record_android)
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          IS_KTS=false
+          if [ -f "android/app/build.gradle.kts" ]; then
+            GRADLE_FILE="android/app/build.gradle.kts"
+            IS_KTS=true
+          fi
+          echo "Appending SDK overrides to $GRADLE_FILE (kts=$IS_KTS)"
+          {
+            echo ""
+            echo "// --- Appended override: required minimum SDK levels for our plugins ---"
+            echo "android {"
+            if [ "$IS_KTS" = true ]; then
+              echo "    compileSdk = 36"
+              echo "    defaultConfig {"
+              echo "        minSdk = 23"
+              echo "        targetSdk = 36"
+              echo "    }"
+            else
+              echo "    compileSdkVersion 36"
+              echo "    defaultConfig {"
+              echo "        minSdkVersion 23"
+              echo "        targetSdkVersion 36"
+              echo "    }"
+            fi
+            echo "}"
+          } >> "$GRADLE_FILE"
+          echo "----- Full $GRADLE_FILE after append -----"
+          cat "$GRADLE_FILE"
+
+      - name: Get Flutter packages
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hifz-companion-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
